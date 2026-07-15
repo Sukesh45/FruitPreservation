@@ -6,8 +6,8 @@ import { Play, Sparkles, Sliders, Check } from "lucide-react";
 const SimulatorPanel = ({ currentData }) => {
   const [temp, setTemp] = useState(currentData?.temperature || 4.0);
   const [humidity, setHumidity] = useState(currentData?.humidity || 85.0);
-  const [gas, setGas] = useState(currentData?.gas_level || 120);
-  const [uv, setUv] = useState(currentData?.uv_status || false);
+  const [gas, setGas] = useState(currentData?.mq135 || 120);
+  const [uv, setUv] = useState(currentData?.uvStatus === "ON" || false);
   const [simulating, setSimulating] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
 
@@ -16,22 +16,24 @@ const SimulatorPanel = ({ currentData }) => {
     if (currentData) {
       setTemp(currentData.temperature);
       setHumidity(currentData.humidity);
-      setGas(currentData.gas_level);
-      setUv(currentData.uv_status);
+      setGas(currentData.mq135 ?? 0);
+      setUv(currentData.uvStatus === "ON");
     }
   }, [currentData]);
 
   const updateFirebase = async (newTemp, newHum, newGas, newUv) => {
     try {
-      const statusRef = ref(db, "fridge_status");
+      // NOTE: This simulator panel writes to FruitPreservation — same path sensors use.
+      // Only use this for testing when real sensors are offline.
+      const statusRef = ref(db, "FruitPreservation");
       await set(statusRef, {
         temperature: parseFloat(newTemp),
         humidity: parseFloat(newHum),
-        gas_level: parseInt(newGas),
-        uv_status: newUv,
-        last_updated: Date.now()
+        mq135: parseInt(newGas),
+        uvStatus: newUv ? "ON" : "OFF",
+        timestamp: Date.now()
       });
-      showFeedback("Synced with Firebase RTDB");
+      showFeedback("Synced with Firebase ✓");
     } catch (error) {
       console.error("Error writing to Firebase:", error);
     }
@@ -60,10 +62,10 @@ const SimulatorPanel = ({ currentData }) => {
         timestamp: Date.now(),
         temperature: parseFloat(temp),
         humidity: parseFloat(humidity),
-        gas_level: parseInt(gas),
-        uv_status: uv
+        mq135: parseInt(gas),
+        uvStatus: uv ? "ON" : "OFF"
       });
-      showFeedback("Added data point to history!");
+      showFeedback("Data point logged to history!");
     } catch (error) {
       console.error("Error adding history entry:", error);
     }
@@ -101,12 +103,12 @@ const SimulatorPanel = ({ currentData }) => {
         <div className="sim-control-group">
           <div className="slider-header">
             <span>Temperature: <strong>{temp}°C</strong></span>
-            <span className="range-label">0°C - 20°C</span>
+            <span className="range-label">0°C - 30°C</span>
           </div>
           <input 
             type="range" 
             min="0" 
-            max="20" 
+            max="30" 
             step="0.5"
             value={temp}
             onChange={(e) => handleSliderChange("temp", e.target.value)}

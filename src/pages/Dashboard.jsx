@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { ref, onValue, set } from "firebase/database";
+import { ref, onValue } from "firebase/database";
 import { useAuth } from "../context/AuthContext";
 import SensorCard from "../components/SensorCard";
 import FreshnessAlert from "../components/FreshnessAlert";
 import TrendChart from "../components/TrendChart";
 import SimulatorPanel from "../components/SimulatorPanel";
+import AutomationPanel from "../components/AutomationPanel";
 import { 
   Thermometer, 
   Droplets, 
@@ -21,13 +22,13 @@ import {
 const Dashboard = () => {
   const { isGuest } = useAuth();
   
-  // Real-time sensor states
+  // Real-time sensor states — matches FruitPreservation Firebase schema
   const [sensorData, setSensorData] = useState({
-    temperature: 4.5,
-    humidity: 85,
-    gas_level: 120,
-    uv_status: false,
-    last_updated: Date.now()
+    temperature: 0,
+    humidity: 0,
+    mq135: 0,
+    uvStatus: "OFF",
+    timestamp: Date.now()
   });
 
   // History state for Recharts
@@ -53,16 +54,16 @@ const Dashboard = () => {
           timestamp: now - i * 60000,
           temperature: 4.0 + Math.sin(i) * 0.5,
           humidity: 85 + Math.cos(i) * 2,
-          gas_level: 110 + (10 - i) * 5,
-          uv_status: i % 3 === 0
+          mq135: 110 + (10 - i) * 5,
+          uvStatus: i % 3 === 0 ? "ON" : "OFF"
         });
       }
       setHistoryData(dummyHistory);
       return;
     }
 
-    // 1. Listen to Realtime Database Status
-    const statusRef = ref(db, "fridge_status");
+    // 1. Listen to FruitPreservation node — real sensor data path
+    const statusRef = ref(db, "FruitPreservation");
     
     const unsubscribeStatus = onValue(statusRef, (snapshot) => {
       if (snapshot.exists()) {
@@ -70,17 +71,12 @@ const Dashboard = () => {
         setSensorData(data);
         setDbConnected(true);
         setUsingFallback(false);
+        console.log("[Firebase] FruitPreservation data received:", data);
       } else {
-        // Database is connected but empty. Let's seed initial values!
-        console.log("Database path is empty. Seeding initial values...");
-        set(statusRef, {
-          temperature: 4.5,
-          humidity: 85.0,
-          gas_level: 120,
-          uv_status: false,
-          last_updated: Date.now()
-        });
+        // Node exists in DB but has no data yet — wait for sensor to push
+        console.warn("[Firebase] FruitPreservation node is empty. Waiting for sensor data...");
         setDbConnected(true);
+        setUsingFallback(false);
       }
       setLoading(false);
     }, (error) => {
@@ -90,16 +86,15 @@ const Dashboard = () => {
       setLoading(false);
     });
 
-    // 2. Listen to History node
+    // 2. Listen to sensor history node (if you log history separately)
     const historyRef = ref(db, "sensor_history");
     const unsubscribeHistory = onValue(historyRef, (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.val();
-        // Convert object list to sorted array
-        const historyList = Object.keys(data).map(key => ({
-          id: key,
-          ...data[key]
-        }));
+        // Convert object map to sorted array
+        const historyList = Object.keys(data)
+          .map(key => ({ id: key, ...data[key] }))
+          .sort((a, b) => a.timestamp - b.timestamp);
         setHistoryData(historyList);
       }
     }, (error) => {
@@ -127,7 +122,7 @@ const Dashboard = () => {
       const handleLocalSimUpdate = (e) => {
         const { type, value } = e.detail;
         setSensorData(prev => {
-          const updated = { ...prev, [type]: value, last_updated: Date.now() };
+          const updated = { ...prev, [type]: value, timestamp: Date.now() };
           
           // If a new historical log was requested
           if (e.detail.logHistory) {
@@ -137,8 +132,8 @@ const Dashboard = () => {
                 timestamp: Date.now(),
                 temperature: updated.temperature,
                 humidity: updated.humidity,
-                gas_level: updated.gas_level,
-                uv_status: updated.uv_status
+                mq135: updated.mq135,
+                uvStatus: updated.uvStatus
               }
             ]);
           }
@@ -159,8 +154,8 @@ const Dashboard = () => {
         detail: {
           temperature: parseFloat(newTemp),
           humidity: parseFloat(newHum),
-          gas_level: parseInt(newGas),
-          uv_status: newUv,
+          mq135: parseInt(newGas),
+          uvStatus: newUv ? "ON" : "OFF",
           logHistory: shouldLog
         }
       });
@@ -168,12 +163,12 @@ const Dashboard = () => {
     }
   };
 
-  // Safe variables computation
-  const temp = parseFloat(sensorData.temperature ?? 4.5);
-  const humidity = parseFloat(sensorData.humidity ?? 85.0);
-  const gasLevel = parseInt(sensorData.gas_level ?? 120);
-  const uvStatus = !!sensorData.uv_status;
-  const lastUpdated = sensorData.last_updated ? new Date(sensorData.last_updated) : new Date();
+  // Safe variables computation — mapped to FruitPreservation Firebase fields
+  const temp = parseFloat(sensorData.temperature ?? 0);
+  const humidity = parseFloat(sensorData.humidity ?? 0);
+  const gasLevel = parseInt(sensorData.mq135 ?? 0);
+  const uvStatus = (sensorData.uvStatus === "ON" || sensorData.uvStatus === true);
+  const lastUpdated = sensorData.timestamp ? new Date(sensorData.timestamp) : new Date();
 
   // UV Status description
   const getUVStatusDescription = () => {
@@ -326,6 +321,7 @@ const Dashboard = () => {
             statusType={gasLevel < 180 ? "success" : gasLevel < 350 ? "warning" : "danger"}
             description="Organic Gas Sniffer"
             glowColor={gasLevel >= 350 ? "#e74c3c" : gasLevel >= 180 ? "#f39c12" : "#2ecc71"}
+            rawKey="mq135"
           />
 
           <SensorCard 
@@ -342,8 +338,9 @@ const Dashboard = () => {
 
         {/* Bottom grid: Chart on Left, Simulator on Right */}
         <div className="dashboard-grid-two-cols">
-          <div className="grid-col-chart">
+          <div className="grid-col-chart" style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
             <TrendChart historyData={historyData} />
+            <AutomationPanel historyData={historyData} isGuest={isGuest} />
           </div>
           
           <div className="grid-col-simulator">
@@ -377,9 +374,9 @@ const LocalSimulatorWrapper = ({ temp, humidity, gas, uv, onChange }) => {
 
   const handleSlider = (type, val) => {
     let t = localTemp, h = localHumidity, g = localGas, u = localUv;
-    if (type === "temp") { setLocalTemp(val); t = val; }
-    if (type === "humidity") { setLocalHumidity(val); h = val; }
-    if (type === "gas") { setLocalGas(val); g = val; }
+    if (type === "temp") { setLocalTemp(parseFloat(val)); t = parseFloat(val); }
+    if (type === "humidity") { setLocalHumidity(parseFloat(val)); h = parseFloat(val); }
+    if (type === "gas") { setLocalGas(parseInt(val)); g = parseInt(val); }
     if (type === "uv") { setLocalUv(val); u = val; }
 
     onChange(t, h, g, u, false);
@@ -429,7 +426,7 @@ const LocalSimulatorWrapper = ({ temp, humidity, gas, uv, onChange }) => {
             <span>Temp (Sandbox): <strong>{localTemp}°C</strong></span>
           </div>
           <input 
-            type="range" min="0" max="20" step="0.5"
+            type="range" min="0" max="30" step="0.5"
             value={localTemp}
             onChange={(e) => handleSlider("temp", e.target.value)}
             className="sim-slider slider-temp"

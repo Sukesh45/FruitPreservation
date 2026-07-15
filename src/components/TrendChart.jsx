@@ -142,8 +142,8 @@ const TrendChart = ({ historyData }) => {
             {(activeMetric === "all" || activeMetric === "gas") && (
               <Line
                 type="monotone"
-                dataKey="gas_level"
-                name="Gas PPM"
+                dataKey="mq135"
+                name="MQ135 Gas"
                 unit=" PPM"
                 stroke="#e74c3c"
                 strokeWidth={2.5}
