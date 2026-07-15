@@ -43,12 +43,13 @@ const EXCEL_PATH = path.resolve(__dirname, "../sensor_history.xlsx");
 // State memory
 let currentTelemetry = null;
 let appSettings = {
-  ownerEmail: process.env.OWNER_EMAIL || "owner@lumora.preservation",
+  ownerEmail: process.env.OWNER_EMAIL || "ksvsanjai20@gmail.com",
   emailAlertsEnabled: true,
   logIntervalHours: 2
 };
 let isAlertActive = false; // Transition lock to avoid spamming alerts
 let logTimer = null;
+let alertResendTimer = null; // Resend timer for unstable alerts
 let lastExcelLogTime = null;
 let lastEmailAlertTime = null;
 
@@ -144,14 +145,14 @@ async function sendEmailAlert(isTest = false) {
 
   const transporter = getMailTransporter();
 
-  const title = isTest ? "[TEST] Lumora IoT Alert System" : "🚨 CRITICAL: Spoilage Alert - Fruit preservation system";
+  const title = isTest ? "[TEST] Lumora IoT Alert System" : "Notification: Preservation Alert - Spoilage Risk Detected";
   const bodyHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e74c3c; border-radius: 8px; background-color: #fff9f9;">
-      <h2 style="color: #e74c3c; border-bottom: 2px solid #e74c3c; padding-bottom: 10px;">
-        ${isTest ? "Lumora Test Alert" : "Lumora Spoilage Danger Notification"}
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #f39c12; border-radius: 8px; background-color: #fffaf0;">
+      <h2 style="color: #f39c12; border-bottom: 2px solid #f39c12; padding-bottom: 10px;">
+        ${isTest ? "Lumora Test Alert" : "Preservation Alert Notification"}
       </h2>
       <p style="font-size: 16px; color: #333;">
-        ${isTest ? "This is a test notification from your Fruit Preservation system. Your SMTP configurations are working perfectly!" : "<strong>Attention Owner:</strong> The environmental metrics inside the preservation storage indicate that the fruits are in <strong>CRITICAL DANGER of spoilage or rot!</strong>"}
+        ${isTest ? "This is a test notification from your Fruit Preservation system. Your SMTP configurations are working perfectly!" : "<strong>Notice:</strong> The environmental metrics inside the preservation storage indicate that the fruits are outside their optimal freshness settings."}
       </p>
       
       <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
@@ -213,6 +214,90 @@ async function sendEmailAlert(isTest = false) {
     updateDaemonStatus();
   } catch (error) {
     console.error("[Email] Failed sending alert email via SMTP:", error);
+  }
+}
+
+// Send Environmental Stabilization Recovery Email
+async function sendResolvedEmail() {
+  const recipient = appSettings.ownerEmail;
+  if (!recipient) {
+    console.warn("[Email] Owner email is not configured. Resolved notice aborted.");
+    return;
+  }
+
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+
+  if (!user || !pass || pass === "somepasswordhere") {
+    console.warn("[Email] SMTP Auth credentials are not set in .env. Email alerting is in SIMULATION mode.");
+    console.log(`[SMTP SIMULATION] Would send recovery notice to: ${recipient}`);
+    return;
+  }
+
+  const transporter = getMailTransporter();
+
+  const title = "✅ RESOLVED: Storage Environment Stabilized - Fruit preservation system safe";
+  const bodyHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #27ae60; border-radius: 8px; background-color: #f2faf4;">
+      <h2 style="color: #27ae60; border-bottom: 2px solid #27ae60; padding-bottom: 10px;">
+        Preservation Environment Restored
+      </h2>
+      <p style="font-size: 16px; color: #333;">
+        <strong>Now in Safe Zone:</strong> The storage climate has returned to normal operational limits. The preservation environment has stabilized and the problem is successfully rectified.
+      </p>
+      
+      <table style="width: 100%; border-collapse: collapse; margin: 20px 0; background: #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <thead>
+          <tr style="background-color: #d4edda; color: #155724; text-align: left;">
+            <th style="padding: 10px; border: 1px solid #ddd;">Metric</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Restored Reading</th>
+            <th style="padding: 10px; border: 1px solid #ddd;">Safe Range</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Temperature</td>
+            <td style="padding: 10px; border: 1px solid #ddd; color: #27ae60; font-weight: bold;">${currentTelemetry?.temperature ?? "N/A"} °C</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">2.0°C - 6.0°C</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Humidity</td>
+            <td style="padding: 10px; border: 1px solid #ddd; color: #27ae60; font-weight: bold;">${currentTelemetry?.humidity ?? "N/A"} % RH</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">80% - 90% RH</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">Spoilage Gas (MQ135)</td>
+            <td style="padding: 10px; border: 1px solid #ddd; color: #27ae60; font-weight: bold;">${currentTelemetry?.mq135 ?? "N/A"} PPM</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">&lt; 180 PPM</td>
+          </tr>
+          <tr>
+            <td style="padding: 10px; border: 1px solid #ddd; font-weight: bold;">UV Sterilizer</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">${currentTelemetry?.uvStatus || "OFF"}</td>
+            <td style="padding: 10px; border: 1px solid #ddd;">ON (during cycles)</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div style="background-color: #eef7f2; border-left: 4px solid #2ecc71; padding: 12px; margin: 20px 0; font-size: 14px; color: #1e5631;">
+        <strong>System Status:</strong> All monitored parameters have returned to the optimal zone. Germicidal sterilization remains active to prevent future bacterial proliferation.
+      </div>
+
+      <p style="font-size: 12px; color: #888; text-align: center; border-top: 1px solid #eee; padding-top: 15px;">
+        Lumora Smart Fruit Preservation System • Automated IoT Notification
+      </p>
+    </div>
+  `;
+
+  try {
+    await transporter.sendMail({
+      from: `"Lumora Core System" <${user}>`,
+      to: recipient,
+      subject: title,
+      html: bodyHtml
+    });
+    console.log(`[Email] Recovery notice sent successfully to ${recipient}`);
+  } catch (error) {
+    console.error("[Email] Failed sending recovery email via SMTP:", error);
   }
 }
 
@@ -342,19 +427,47 @@ async function main() {
       // Check condition and send alert email if very bad
       if (condition === "Spoilage / Toxic Risk") {
         if (!isAlertActive) {
+          isAlertActive = true; // Lock alert immediately to prevent duplicate concurrent triggers
           console.log("[Preservation Alert] Spoilage risk detected! Triggering alert email.");
           if (appSettings.emailAlertsEnabled) {
             await sendEmailAlert(false);
+            
+            // Set up a 10-minute resend timer if condition is not resolved
+            if (!alertResendTimer) {
+              console.log("[Preservation Alert] Starting 10-minute resend timer for unstable conditions.");
+              alertResendTimer = setInterval(async () => {
+                if (currentTelemetry) {
+                  const currentCondition = checkTelemetryCondition(currentTelemetry);
+                  if (currentCondition === "Spoilage / Toxic Risk" && appSettings.emailAlertsEnabled) {
+                    console.log("[Preservation Alert] Environment remains unstable. Re-sending alert email.");
+                    await sendEmailAlert(false);
+                  }
+                }
+              }, 10 * 60 * 1000); // 10 minutes interval
+            }
           } else {
             console.log("[Preservation Alert] Email alerts are disabled in settings.");
           }
-          isAlertActive = true; // Lock alert until it goes safe again
         }
       } else {
         // Reset alert block if condition returns to normal
         if (isAlertActive) {
           console.log("[Preservation Alert] Environmental status stabilized. Alert reset.");
+          
+          // Clear resend timer
+          if (alertResendTimer) {
+            clearInterval(alertResendTimer);
+            alertResendTimer = null;
+            console.log("[Preservation Alert] Resend timer cleared.");
+          }
+          
           isAlertActive = false;
+          
+          // Send recovery email
+          if (appSettings.emailAlertsEnabled) {
+            console.log("[Preservation Alert] Sending environment restored notice to owner.");
+            await sendResolvedEmail();
+          }
         }
       }
     }
