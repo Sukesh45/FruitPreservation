@@ -7,6 +7,7 @@ import FreshnessAlert from "../components/FreshnessAlert";
 import TrendChart from "../components/TrendChart";
 import SimulatorPanel from "../components/SimulatorPanel";
 import AutomationPanel from "../components/AutomationPanel";
+import GasBreakdownCard from "../components/GasBreakdownCard";
 import { 
   Thermometer, 
   Droplets, 
@@ -334,6 +335,11 @@ const Dashboard = () => {
             description="15m on / 3h cycle"
             glowColor={uvStatus ? "#9b59b6" : "rgba(255,255,255,0.1)"}
           />
+        </div>
+
+        {/* Gas Composition Breakdown from MQ135 */}
+        <div className="dashboard-row full-width" style={{ marginTop: "0" }}>
+          <GasBreakdownCard mq135Ppm={gasLevel} />
         </div>
 
         {/* Bottom grid: Chart on Left, Simulator on Right */}
