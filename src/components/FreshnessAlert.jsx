@@ -74,6 +74,14 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
     recommendations.push("All systems running optimally. UV light sterilization is actively eliminating bacteria and mold spores.");
   }
 
+  // Candidate models from Groq developer plan in priority order
+  const CANDIDATE_MODELS = [
+    import.meta.env.GROQ_MODEL,
+    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
+    "qwen/qwen3.8-27b"
+  ].filter(Boolean);
+
   // Groq API Call
   const analyzeWithAI = async () => {
     const apiKey = import.meta.env.GROQ_API_KEY || import.meta.env.VITE_GROQ_API_KEY;
@@ -86,40 +94,58 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
     setError(false);
 
     try {
-      const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${apiKey}`
-        },
-        body: JSON.stringify({
-          model: "llama-3.1-8b-instant",
-          messages: [
-            {
-              role: "system",
-              content: "You are Lumora AI, an advanced IoT fruit preservation assistant. Analyze the provided sensor data (Temperature, Humidity, Gas Level, UV Status) and return a JSON object. The JSON object must contain exactly these keys: 'score' (number 0-100 representing safety index), 'status' (string matching the rating), 'statusType' (string: success/warning/danger), 'daysFresh' (number representing estimated shelf life), 'aiInsights' (string explaining biological/chemical decay or preservation factors), 'recommendations' (array of strings. You MUST include explicit preservation tips detailing what specific adjustments to temperature, humidity, gas levels, and UV status the user should perform to prolong the fruit's freshness for additional days. Provide exact target ranges and shelf-life extension estimates, e.g., 'Lower temperature to 2°C - 5°C to gain +4 days of freshness', 'Set humidity to 80-90% to avoid shriveling', 'Turn on UV sterilizer cycles to suppress bacterial activity')."
-            },
-            {
-              role: "user",
-              content: `JSON Sensor telemetry inputs:\n- Temperature: ${temperature}°C\n- Humidity: ${humidity}%\n- MQ135 Spoilage Gas: ${gasLevel} PPM\n- UV Sterilizer: ${uvStatus ? "ON" : "OFF"}`
-            }
-          ],
-          response_format: { type: "json_object" }
-        })
-      });
+      let data = null;
+      let lastErrorMessage = "";
 
-      if (!response.ok) {
-        throw new Error(`Groq HTTP error: ${response.status}`);
+      for (const model of CANDIDATE_MODELS) {
+        try {
+          const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+              model,
+              messages: [
+                {
+                  role: "system",
+                  content: "You are Lumora AI, an advanced IoT fruit preservation assistant. Analyze the provided sensor data (Temperature, Humidity, Gas Level, UV Status) and return a JSON object. The JSON object must contain exactly these keys: 'score' (number 0-100 representing safety index), 'status' (string matching the rating: e.g. FRESH, RIPENING, CRITICAL), 'statusType' (string: success/warning/danger), 'daysFresh' (number representing estimated shelf life), 'aiInsights' (string explaining biological/chemical decay or preservation factors), 'recommendations' (array of strings. You MUST include explicit preservation tips detailing what specific adjustments to temperature, humidity, gas levels, and UV status the user should perform to prolong the fruit's freshness for additional days. Provide exact target ranges and shelf-life extension estimates)."
+                },
+                {
+                  role: "user",
+                  content: `JSON Sensor telemetry inputs:\n- Temperature: ${temperature}°C\n- Humidity: ${humidity}%\n- MQ135 Spoilage Gas: ${gasLevel} PPM\n- UV Sterilizer: ${uvStatus ? "ON" : "OFF"}`
+                }
+              ],
+              response_format: { type: "json_object" }
+            })
+          });
+
+          if (response.ok) {
+            data = await response.json();
+            break;
+          } else {
+            const errJson = await response.json().catch(() => ({}));
+            lastErrorMessage = errJson?.error?.message || `Groq HTTP ${response.status}`;
+            console.warn(`Model ${model} failed:`, lastErrorMessage);
+          }
+        } catch (innerErr) {
+          lastErrorMessage = innerErr.message;
+          console.warn(`Model ${model} request error:`, innerErr);
+        }
       }
 
-      const data = await response.json();
+      if (!data || !data.choices?.[0]?.message?.content) {
+        throw new Error(lastErrorMessage || "All Groq model requests failed.");
+      }
+
       const rawText = data.choices[0].message.content;
       const parsed = JSON.parse(rawText);
 
       setAiResult(parsed);
     } catch (err) {
-      console.error(err);
-      setError("AI service unavailable. Make sure your Groq key is valid and you are online.");
+      console.error("AI Analysis Error:", err);
+      setError(err.message || "AI service unavailable. Make sure your Groq key is valid and you are online.");
     } finally {
       setLoading(false);
     }
@@ -128,7 +154,8 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
   // Determine current display values (AI vs Rule Engine)
   const displayScore = aiResult ? aiResult.score : score;
   const displayStatus = aiResult ? aiResult.status : status;
-  const displayStatusType = aiResult ? aiResult.statusType : statusType;
+  const rawStatusType = aiResult ? aiResult.statusType : statusType;
+  const displayStatusType = (rawStatusType || "success").toLowerCase();
   const displayDaysFresh = aiResult ? aiResult.daysFresh : daysFresh;
   const displayRecommendations = aiResult ? aiResult.recommendations : recommendations;
 
