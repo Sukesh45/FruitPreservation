@@ -76,9 +76,9 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
 
   // Groq API Call
   const analyzeWithAI = async () => {
-    const apiKey = import.meta.env.VITE_GROQ_API_KEY;
+    const apiKey = import.meta.env.GROQ_API_KEY || import.meta.env.VITE_GROQ_API_KEY;
     if (!apiKey) {
-      setError("Groq API Key is not set. Add VITE_GROQ_API_KEY to your .env file.");
+      setError("Groq API Key is not set. Add GROQ_API_KEY to your environment variables or .env file.");
       return;
     }
 
@@ -146,7 +146,7 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
   };
 
   const alertBgClass = `freshness-alert-card bg-${displayStatusType}`;
-  const apiKeyExists = !!import.meta.env.VITE_GROQ_API_KEY;
+  const apiKeyExists = !!(import.meta.env.GROQ_API_KEY || import.meta.env.VITE_GROQ_API_KEY);
 
   return (
     <div className={alertBgClass}>
@@ -212,7 +212,7 @@ const FreshnessAlert = ({ temperature, humidity, gasLevel, uvStatus }) => {
 
       {!apiKeyExists && !aiResult && (
         <div className="ai-alert-helper">
-          <span>💡 Optional: Set <code>VITE_GROQ_API_KEY</code> in <code>.env</code> for AI recommendations & bio-chemical insights.</span>
+          <span>💡 Optional: Set <code>GROQ_API_KEY</code> in environment variables / <code>.env</code> for AI recommendations & bio-chemical insights.</span>
         </div>
       )}
 
